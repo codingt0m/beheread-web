@@ -416,7 +416,7 @@ export default function Reader() {
 
   // =================== LISEUSE ===================
   return (
-    <div className="reader">
+    <div className={`reader${isFullscreen ? ' fullscreen' : ''}`}>
       <header className="toolbar">
         <button className="ghost" onClick={close} title="Fermer (Echap)">Fermer</button>
         <span className="title" title={fileName}>{fileName}</span>

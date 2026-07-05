@@ -122,6 +122,13 @@ kbd {
   background: var(--reader-bg);
 }
 
+/* Plein ecran : lecture immersive, on masque les barres.
+   Sortie par Echap ou F11. */
+.reader.fullscreen .toolbar,
+.reader.fullscreen .statusbar {
+  display: none;
+}
+
 .toolbar {
   display: flex;
   align-items: center;
