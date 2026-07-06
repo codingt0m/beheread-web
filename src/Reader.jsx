@@ -68,6 +68,7 @@ export default function Reader() {
   const [doublePage, setDoublePage] = useState(prefs.doublePage ?? true)
   const [mangaMode, setMangaMode] = useState(prefs.mangaMode ?? true)
   const [fitMode, setFitMode] = useState(prefs.fitMode ?? FIT_WINDOW)
+  const [pageOffset, setPageOffset] = useState(prefs.pageOffset ?? 0)  // parite double page (0/1)
 
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
@@ -86,8 +87,8 @@ export default function Reader() {
 
   // Sauvegarde des preferences a chaque changement
   useEffect(() => {
-    savePrefs({ doublePage, mangaMode, fitMode })
-  }, [doublePage, mangaMode, fitMode])
+    savePrefs({ doublePage, mangaMode, fitMode, pageOffset })
+  }, [doublePage, mangaMode, fitMode, pageOffset])
 
   // ---- Libere la memoire : on revoque toutes les URLs blob ----
   const revokeAll = useCallback(() => {
@@ -200,12 +201,16 @@ export default function Reader() {
     return r != null && r > 1   // image plus large que haute = planche double
   }, [ratioTick])
 
-  const currentIndices = useCallback(() => {
-    if (doublePage && index + 1 < total && !isSpread(index) && !isSpread(index + 1)) {
-      return [index, index + 1]
-    }
-    return [index]
-  }, [doublePage, index, total, isSpread])
+  // La page p forme-t-elle une paire avec p+1 ? Depend du decalage de parite
+  // (touche S) et des planches doubles (jamais couplees).
+  const pairsWithNext = useCallback((p) => (
+    doublePage && p >= 0 && p + 1 < total && !isSpread(p) && !isSpread(p + 1)
+    && ((p - pageOffset) % 2 === 0)
+  ), [doublePage, total, isSpread, pageOffset])
+
+  const currentIndices = useCallback(() => (
+    pairsWithNext(index) ? [index, index + 1] : [index]
+  ), [pairsWithNext, index])
 
   const goto = useCallback((i) => {
     setHudExtra('')
@@ -224,9 +229,9 @@ export default function Reader() {
     if (!doublePage) return 1
     const p = index - 1
     if (p <= 0) return 1
-    if (!isSpread(p - 1) && !isSpread(p)) return 2
+    if (pairsWithNext(p - 1)) return 2
     return 1
-  }, [doublePage, index, isSpread])
+  }, [doublePage, index, pairsWithNext])
 
   const prevPage = useCallback((step) => {
     const s = step ?? stepBack()
@@ -236,6 +241,18 @@ export default function Reader() {
   // ---- Modes ----
   const toggleDouble = useCallback(() => setDoublePage((d) => !d), [])
   const toggleManga = useCallback(() => setMangaMode((m) => !m), [])
+  // Decalage de parite (S) : on garde la page courante visible en la
+  // re-appairant avec sa voisine precedente, plutot que de l'isoler en page
+  // simple. (p, p+1) -> (p-1, p) ; c'est la bonne planche double quand une
+  // couverture en tete decale tout l'appairage. Au tout debut, la couverture
+  // reste seule (pas de voisine avant elle).
+  const shiftParity = useCallback(() => {
+    const no = pageOffset ^ 1
+    setPageOffset(no)
+    if (doublePage && index > 0 && ((index - no) % 2 !== 0)) {
+      goto(index - 1)
+    }
+  }, [pageOffset, doublePage, index, goto])
   const cycleFit = useCallback(() => {
     setFitMode((f) => (f + 1) % 3)
     setZoom(1)
@@ -321,6 +338,7 @@ export default function Reader() {
         case 'End': goto(total - 1); break
         case 'd': case 'D': toggleDouble(); break
         case 'm': case 'M': toggleManga(); break
+        case 's': case 'S': shiftParity(); break
         case 'f': case 'F': cycleFit(); break
         case '+': case '=': setZoomClamped(zoom * 1.15); break
         case '-': setZoomClamped(zoom / 1.15); break
@@ -336,7 +354,7 @@ export default function Reader() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [total, nextPage, prevPage, goto, mangaMode, zoom, toggleDouble, toggleManga,
-      cycleFit, setZoomClamped, toggleFullscreen, close])
+      shiftParity, cycleFit, setZoomClamped, toggleFullscreen, close])
 
   // ---- Molette : Ctrl = zoom, sinon page suivante/precedente ----
   useEffect(() => {
@@ -428,6 +446,10 @@ export default function Reader() {
           <button onClick={toggleManga} title="Sens de lecture (M)">
             {mangaMode ? 'Manga →←' : 'Normal ←→'} <kbd>M</kbd>
           </button>
+          <button onClick={shiftParity} disabled={!doublePage}
+                  title="Decalage de parite double page (S)">
+            {pageOffset ? 'Decale' : 'Aligne'} <kbd>S</kbd>
+          </button>
           <button onClick={cycleFit} title={`${FIT_NAMES[fitMode]} (F)`}>
             Ajuster <kbd>F</kbd>
           </button>
@@ -478,6 +500,7 @@ export default function Reader() {
         <span className="hud">
           {pageLabel}
           <span className="sep">|</span>{doublePage ? 'Double' : 'Page unique'}
+          {doublePage && <><span className="sep">|</span>{pageOffset ? 'Decalage [S]' : 'Aligne [S]'}</>}
           <span className="sep">|</span>{mangaMode ? 'Manga (droite → gauche)' : 'Normal (gauche → droite)'}
           <span className="sep">|</span>{FIT_NAMES[fitMode]}
           {zoom !== 1 && <><span className="sep">|</span>Zoom {Math.round(zoom * 100)}%</>}
