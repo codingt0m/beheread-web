@@ -1,41 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import JSZip from 'jszip'
-
-// Extensions d'images reconnues a l'interieur de l'archive .cbz
-const IMAGE_RE = /\.(jpe?g|png|gif|webp|avif|bmp)$/i
-
-const FIT_WINDOW = 0
-const FIT_WIDTH = 1
-const FIT_HEIGHT = 2
-const FIT_NAMES = {
-  [FIT_WINDOW]: 'Ajuster a la fenetre',
-  [FIT_WIDTH]: 'Ajuster a la largeur',
-  [FIT_HEIGHT]: 'Ajuster a la hauteur',
-}
-
-const PREFS_KEY = 'beheread-web:prefs'
-
-// Tri "naturel" : page2.jpg passe bien AVANT page10.jpg
-function naturalCompare(a, b) {
-  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
-}
-
-function loadPrefs() {
-  try {
-    return JSON.parse(localStorage.getItem(PREFS_KEY)) || {}
-  } catch {
-    return {}
-  }
-}
-
-function savePrefs(prefs) {
-  // Safari en navigation privee peut lever une exception sur setItem
-  try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
-  } catch {
-    /* ignore */
-  }
-}
+import { loadPrefs, savePrefs } from './lib/prefs.js'
+import { filterAndSortEntries } from './lib/entries.js'
+import { currentIndices as computeCurrentIndices, stepBack as computeStepBack } from './lib/pagination.js'
+import { FIT_WINDOW, FIT_NAMES, computeLayout, clampPan as computeClampPan } from './lib/layout.js'
 
 // ---- Plein ecran multi-navigateurs (Safari utilise les variantes webkit) ----
 function fsElement() {
@@ -107,15 +75,7 @@ export default function Reader() {
     setProgress(0)
     try {
       const zip = await JSZip.loadAsync(file)
-      const entries = Object.values(zip.files)
-        .filter(
-          (e) =>
-            !e.dir &&
-            IMAGE_RE.test(e.name) &&
-            !e.name.split('/').pop().startsWith('.') &&
-            !e.name.startsWith('__MACOSX'),
-        )
-        .sort((a, b) => naturalCompare(a.name, b.name))
+      const entries = filterAndSortEntries(Object.values(zip.files))
 
       if (entries.length === 0) {
         throw new Error('Aucune image trouvee dans ce fichier .cbz.')
@@ -196,21 +156,11 @@ export default function Reader() {
   }, [total, loadRatio])
 
   // ---- Logique de pagination (identique au lecteur de bureau) ----
-  const isSpread = useCallback((i) => {
-    const r = ratiosRef.current[i]
-    return r != null && r > 1   // image plus large que haute = planche double
-  }, [ratioTick])
-
-  // La page p forme-t-elle une paire avec p+1 ? Depend du decalage de parite
-  // (touche S) et des planches doubles (jamais couplees).
-  const pairsWithNext = useCallback((p) => (
-    doublePage && p >= 0 && p + 1 < total && !isSpread(p) && !isSpread(p + 1)
-    && ((p - pageOffset) % 2 === 0)
-  ), [doublePage, total, isSpread, pageOffset])
+  const paginationState = { doublePage, total, pageOffset }
 
   const currentIndices = useCallback(() => (
-    pairsWithNext(index) ? [index, index + 1] : [index]
-  ), [pairsWithNext, index])
+    computeCurrentIndices(ratiosRef.current, paginationState, index)
+  ), [ratioTick, doublePage, total, pageOffset, index])
 
   const goto = useCallback((i) => {
     setHudExtra('')
@@ -225,13 +175,9 @@ export default function Reader() {
     else setHudExtra('Fin du manga  (Echap : fermer)')
   }, [index, total, currentIndices, goto])
 
-  const stepBack = useCallback(() => {
-    if (!doublePage) return 1
-    const p = index - 1
-    if (p <= 0) return 1
-    if (pairsWithNext(p - 1)) return 2
-    return 1
-  }, [doublePage, index, pairsWithNext])
+  const stepBack = useCallback(() => (
+    computeStepBack(ratiosRef.current, { doublePage, index, total, pageOffset })
+  ), [ratioTick, doublePage, index, total, pageOffset])
 
   const prevPage = useCallback((step) => {
     const s = step ?? stepBack()
@@ -290,36 +236,17 @@ export default function Reader() {
   const indices = currentIndices()
   const displayReady = indices.every((i) => ratiosRef.current[i] != null)
 
-  let layout = null
-  if (displayReady && stageSize.w > 0 && stageSize.h > 0) {
-    const vw = stageSize.w
-    const vh = stageSize.h
-    let items = indices.map((i) => ({ i, r: ratiosRef.current[i], src: pages[i] }))
-    if (mangaMode && items.length === 2) items = [items[1], items[0]]  // RTL
-    const rsum = items.reduce((s, it) => s + it.r, 0)
-    let h
-    if (fitMode === FIT_WIDTH) h = vw / rsum
-    else if (fitMode === FIT_HEIGHT) h = vh
-    else h = Math.min(vh, vw / rsum)
-    h *= zoom
-    const sized = items.map((it) => ({ ...it, w: h * it.r, h }))
-    const totalW = sized.reduce((s, it) => s + it.w, 0)
-    layout = {
-      sized,
-      overflowX: Math.max(0, totalW - vw),
-      overflowY: Math.max(0, h - vh),
-    }
-  }
+  const layout = computeLayout({
+    indices,
+    ratios: ratiosRef.current,
+    pages,
+    mangaMode,
+    fitMode,
+    zoom,
+    stageSize,
+  })
 
-  const clampPan = useCallback((x, y) => {
-    if (!layout) return { x: 0, y: 0 }
-    const mx = layout.overflowX / 2
-    const my = layout.overflowY / 2
-    return {
-      x: Math.max(-mx, Math.min(mx, x)),
-      y: Math.max(-my, Math.min(my, y)),
-    }
-  }, [layout])
+  const clampPan = useCallback((x, y) => computeClampPan(layout, x, y), [layout])
 
   // ---- Clavier (mappage identique au lecteur de bureau) ----
   useEffect(() => {

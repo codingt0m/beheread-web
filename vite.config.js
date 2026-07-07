@@ -5,4 +5,7 @@ import react from '@vitejs/plugin-react'
 // Aucun proxy, aucune fonction serveur : tout tourne dans le navigateur.
 export default defineConfig({
   plugins: [react()],
+  test: {
+    environment: 'jsdom',
+  },
 })
