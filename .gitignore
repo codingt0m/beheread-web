@@ -2,6 +2,7 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
 .vercel
 .DS_Store
 npm-debug.log*

@@ -22,7 +22,19 @@ function fsSupported() {
   return !!(el.requestFullscreen || el.webkitRequestFullscreen)
 }
 
-export default function Reader() {
+// `initialSource` (optional): { id, name, blob } - when provided, the reader
+// skips its own local pick/drop welcome screen and opens this source
+// directly (used by App.jsx for a Drive-backed file). `fileKey`/`initialPage`
+// / `onProgress` wire up cloud-persisted reading progress; `onClose` navigates
+// back to the library instead of resetting to the local welcome screen;
+// `onRequestNext` powers the end-of-volume auto-advance prompt.
+export default function Reader({
+  initialSource,
+  initialPage = 0,
+  onClose,
+  onProgress,
+  onRequestNext,
+} = {}) {
   const prefs = loadPrefs()
 
   const [pages, setPages] = useState([])   // tableau d'URLs blob (une par page)
@@ -67,14 +79,16 @@ export default function Reader() {
 
   useEffect(() => () => revokeAll(), [revokeAll])
 
-  // ---- Ouverture et extraction du .cbz, 100% en memoire (aucun upload) ----
-  const openFile = useCallback(async (file) => {
-    if (!file) return
+  // ---- Ouverture et extraction du .cbz/.zip, 100% en memoire ----
+  // (aucun upload : que la source soit un fichier local ou un blob deja
+  // telecharge depuis Drive par l'appelant, tout se passe dans le navigateur)
+  const openArchive = useCallback(async (source, displayName) => {
+    if (!source) return
     setLoading(true)
     setError('')
     setProgress(0)
     try {
-      const zip = await JSZip.loadAsync(file)
+      const zip = await JSZip.loadAsync(source)
       const entries = filterAndSortEntries(Object.values(zip.files))
 
       if (entries.length === 0) {
@@ -91,18 +105,32 @@ export default function Reader() {
       revokeAll()
       pagesRef.current = urls
       setPages(urls)
-      setIndex(0)
+      setIndex(Math.max(0, Math.min(initialPage ?? 0, urls.length - 1)))
       setPan({ x: 0, y: 0 })
       setZoom(1)
       setHudExtra('')
-      setFileName(file.name)
+      setFileName(displayName)
     } catch (err) {
       setError(err?.message || 'Fichier illisible ou corrompu.')
       setPages([])
     } finally {
       setLoading(false)
     }
-  }, [revokeAll])
+  }, [revokeAll, initialPage])
+
+  const openFile = useCallback((file) => openArchive(file, file?.name ?? ''), [openArchive])
+
+  // Ouverture automatique de la source fournie par le parent (bibliotheque
+  // Drive), une seule fois par source (garde contre le double effet du
+  // StrictMode en developpement).
+  const openedSourceRef = useRef(null)
+  useEffect(() => {
+    if (!initialSource) return
+    const sourceId = initialSource.id ?? initialSource.name
+    if (openedSourceRef.current === sourceId) return
+    openedSourceRef.current = sourceId
+    openArchive(initialSource.blob, initialSource.name)
+  }, [initialSource, openArchive])
 
   const close = useCallback(() => {
     if (fsElement()) fsExit()
@@ -114,7 +142,15 @@ export default function Reader() {
     setFileName('')
     setError('')
     if (inputRef.current) inputRef.current.value = ''
-  }, [revokeAll])
+    onClose?.()
+  }, [revokeAll, onClose])
+
+  // Remonte la progression de lecture au parent (persistee via le Store
+  // cote App quand le fichier vient de Drive) a chaque changement de page.
+  useEffect(() => {
+    if (!onProgress || total === 0) return
+    onProgress(index, total, index >= total - 1)
+  }, [index, total, onProgress])
 
   // ---- Chargement des dimensions (ratio) pour la detection des planches doubles ----
   const loadRatio = useCallback((i) => new Promise((resolve) => {
@@ -172,8 +208,10 @@ export default function Reader() {
     const s = step ?? currentIndices().length
     if (index + s <= total - 1) goto(index + s)
     else if (index < total - 1) goto(total - 1)
-    else setHudExtra('Fin du manga  (Echap : fermer)')
-  }, [index, total, currentIndices, goto])
+    else setHudExtra(onRequestNext
+      ? 'Fin du tome  (Entree : tome suivant, Echap : fermer)'
+      : 'Fin du manga  (Echap : fermer)')
+  }, [index, total, currentIndices, goto, onRequestNext])
 
   const stepBack = useCallback(() => (
     computeStepBack(ratiosRef.current, { doublePage, index, total, pageOffset })
@@ -271,6 +309,9 @@ export default function Reader() {
         case '-': setZoomClamped(zoom / 1.15); break
         case '0': setZoomClamped(1); break
         case 'F11': e.preventDefault(); toggleFullscreen(); break
+        case 'Enter':
+          if (index >= total - 1 && onRequestNext) onRequestNext()
+          break
         case 'Escape':
           if (fsElement()) fsExit()
           else close()
@@ -280,7 +321,7 @@ export default function Reader() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [total, nextPage, prevPage, goto, mangaMode, zoom, toggleDouble, toggleManga,
+  }, [total, index, onRequestNext, nextPage, prevPage, goto, mangaMode, zoom, toggleDouble, toggleManga,
       shiftParity, cycleFit, setZoomClamped, toggleFullscreen, close])
 
   // ---- Molette : Ctrl = zoom, sinon page suivante/precedente ----
@@ -327,6 +368,20 @@ export default function Reader() {
 
   // =================== ECRAN D'ACCUEIL ===================
   if (total === 0) {
+    // Source fournie par le parent (bibliotheque Drive) : pas d'ecran de
+    // selection locale, juste l'etat de chargement/erreur en cours.
+    if (initialSource) {
+      return (
+        <div className="welcome">
+          <img className="logo" src="/icon-256.png" alt="Beheread" />
+          {loading && <p className="subtitle">Chargement... {progress}%</p>}
+          {error && <p className="error">{error}</p>}
+          {!loading && onClose && (
+            <button className="ghost" onClick={onClose}>Retour a la bibliotheque</button>
+          )}
+        </div>
+      )
+    }
     const onDrop = (e) => {
       e.preventDefault()
       const file = e.dataTransfer.files?.[0]
@@ -363,7 +418,9 @@ export default function Reader() {
   return (
     <div className={`reader${isFullscreen ? ' fullscreen' : ''}`}>
       <header className="toolbar">
-        <button className="ghost" onClick={close} title="Fermer (Echap)">Fermer</button>
+        <button className="ghost" onClick={close} title={onClose ? 'Retour a la bibliotheque (Echap)' : 'Fermer (Echap)'}>
+          {onClose ? 'Bibliotheque' : 'Fermer'}
+        </button>
         <span className="title" title={fileName}>{fileName}</span>
 
         <div className="controls">
