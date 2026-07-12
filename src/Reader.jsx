@@ -17,6 +17,10 @@ function fsExit() {
   const fn = document.exitFullscreen || document.webkitExitFullscreen
   if (fn) fn.call(document)
 }
+// Safari iPhone n'implemente l'API Fullscreen que pour les <video> : ni
+// requestFullscreen ni webkitRequestFullscreen sur un element quelconque. On
+// bascule alors sur un plein ecran "CSS" (la liseuse couvre tout le viewport,
+// barres masquees) - voir `immersive` plus bas.
 function fsSupported() {
   const el = document.documentElement
   return !!(el.requestFullscreen || el.webkitRequestFullscreen)
@@ -52,7 +56,9 @@ export default function Reader({
 
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
-  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [nativeFs, setNativeFs] = useState(false)   // plein ecran natif (desktop, Android, iPad)
+  const [immersive, setImmersive] = useState(false) // repli CSS (iPhone)
+  const isFullscreen = nativeFs || immersive
   const [hudExtra, setHudExtra] = useState('')
   const [ratioTick, setRatioTick] = useState(0)  // force le recalcul quand un ratio arrive
   const [stageSize, setStageSize] = useState({ w: 0, h: 0 })
@@ -134,6 +140,7 @@ export default function Reader({
 
   const close = useCallback(() => {
     if (fsElement()) fsExit()
+    setImmersive(false)
     revokeAll()
     setPages([])
     setIndex(0)
@@ -246,11 +253,12 @@ export default function Reader({
 
   const toggleFullscreen = useCallback(() => {
     if (fsElement()) fsExit()
-    else fsRequest(document.documentElement)
+    else if (fsSupported()) fsRequest(document.documentElement)
+    else setImmersive((v) => !v)
   }, [])
 
   useEffect(() => {
-    const h = () => setIsFullscreen(!!fsElement())
+    const h = () => setNativeFs(!!fsElement())
     document.addEventListener('fullscreenchange', h)
     document.addEventListener('webkitfullscreenchange', h)
     return () => {
@@ -314,6 +322,7 @@ export default function Reader({
           break
         case 'Escape':
           if (fsElement()) fsExit()
+          else if (immersive) setImmersive(false)
           else close()
           break
         default: break
@@ -322,7 +331,7 @@ export default function Reader({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [total, index, onRequestNext, nextPage, prevPage, goto, mangaMode, zoom, toggleDouble, toggleManga,
-      shiftParity, cycleFit, setZoomClamped, toggleFullscreen, close])
+      shiftParity, cycleFit, setZoomClamped, toggleFullscreen, close, immersive])
 
   // ---- Molette : Ctrl = zoom, sinon page suivante/precedente ----
   useEffect(() => {
@@ -442,13 +451,24 @@ export default function Reader({
             <button onClick={() => setZoomClamped(1)} title="Reinitialiser (0)">{Math.round(zoom * 100)}%</button>
             <button onClick={() => setZoomClamped(zoom * 1.15)} title="Zoom + (+)">+</button>
           </div>
-          {fsSupported() && (
-            <button onClick={toggleFullscreen} title="Plein ecran (F11)">
-              {isFullscreen ? 'Quitter' : 'Plein ecran'}
-            </button>
-          )}
+          <button onClick={toggleFullscreen} title="Plein ecran (F11)">
+            {isFullscreen ? 'Quitter' : 'Plein ecran'}
+          </button>
         </div>
       </header>
+
+      {/* En plein ecran les barres disparaissent : sur mobile (pas de touche
+          Echap) ce bouton flottant est le seul moyen de revenir en arriere. */}
+      {isFullscreen && (
+        <button
+          className="fs-exit"
+          onClick={toggleFullscreen}
+          title="Quitter le plein ecran (Echap)"
+          aria-label="Quitter le plein ecran"
+        >
+          ✕
+        </button>
+      )}
 
       <div
         className="stage"
