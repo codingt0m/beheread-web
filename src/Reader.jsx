@@ -17,11 +17,20 @@ function fsExit() {
   const fn = document.exitFullscreen || document.webkitExitFullscreen
   if (fn) fn.call(document)
 }
+function isIOS() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+}
+
 // Safari iPhone n'implemente l'API Fullscreen que pour les <video> : ni
 // requestFullscreen ni webkitRequestFullscreen sur un element quelconque. On
 // bascule alors sur un plein ecran "CSS" (la liseuse couvre tout le viewport,
 // barres masquees) - voir `immersive` plus bas.
+// Sur iPad, le vrai Fullscreen affiche une croix native inenlevable, donc
+// on le desactive volontairement pour forcer le mode Immersive (CSS) et 
+// n'avoir que la croix de l'application.
 function fsSupported() {
+  if (isIOS()) return false
   const el = document.documentElement
   return !!(el.requestFullscreen || el.webkitRequestFullscreen)
 }
@@ -68,6 +77,8 @@ export default function Reader({
   const pagesRef = useRef([])              // miroir de `pages` pour le nettoyage
   const ratiosRef = useRef({})             // index -> largeur/hauteur (detection planche double)
   const dragRef = useRef({ origin: null, dragged: false })
+  const pointersRef = useRef(new Map())
+  const pinchRef = useRef({ active: false, initialDist: 0, initialZoom: 1, didPinch: false })
 
   const total = pages.length
 
@@ -350,29 +361,113 @@ export default function Reader({
     return () => el.removeEventListener('wheel', onWheel)
   }, [total, zoom, nextPage, prevPage, setZoomClamped])
 
-  // ---- Souris : glisser = pan, clic simple = zone gauche/droite ----
+  // ---- Touch / Souris : Pinch = zoom, Glisser = pan, Swipe = page, Clic = zone ----
   const onPointerDown = (e) => {
-    dragRef.current = { origin: { x: e.clientX, y: e.clientY }, dragged: false }
-  }
-  const onPointerMove = (e) => {
-    const d = dragRef.current
-    if (!d.origin || e.buttons !== 1) return
-    const dx = e.clientX - d.origin.x
-    const dy = e.clientY - d.origin.y
-    if (d.dragged || Math.abs(dx) + Math.abs(dy) > 6) {
-      d.dragged = true
-      d.origin = { x: e.clientX, y: e.clientY }
-      setPan((p) => clampPan(p.x + dx, p.y + dy))
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    
+    if (pointersRef.current.size === 2) {
+      const pts = Array.from(pointersRef.current.values())
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
+      pinchRef.current = { active: true, initialDist: dist, initialZoom: zoom, didPinch: true }
+    } else if (pointersRef.current.size === 1) {
+      pinchRef.current.didPinch = false // On commence un nouveau geste potentiel
+      dragRef.current = { 
+        origin: { x: e.clientX, y: e.clientY }, 
+        startOrigin: { x: e.clientX, y: e.clientY },
+        startTime: Date.now(),
+        dragged: false,
+        isPan: false
+      }
     }
   }
+
+  const onPointerMove = (e) => {
+    if (!pointersRef.current.has(e.pointerId)) return
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+    if (pointersRef.current.size === 2 && pinchRef.current.active) {
+      const pts = Array.from(pointersRef.current.values())
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
+      setZoomClamped(pinchRef.current.initialZoom * (dist / pinchRef.current.initialDist))
+      return
+    }
+
+    if (pointersRef.current.size === 1 && !pinchRef.current.active) {
+      const d = dragRef.current
+      if (!d.origin) return
+      // Accepter le touch sans boutons (sur iOS Safari), rejeter la souris sans clic
+      if (e.pointerType === 'mouse' && e.buttons !== 1) return
+
+      const dx = e.clientX - d.origin.x
+      const dy = e.clientY - d.origin.y
+
+      if (d.dragged || Math.abs(dx) + Math.abs(dy) > 6) {
+        d.dragged = true
+        d.origin = { x: e.clientX, y: e.clientY }
+        
+        // On pan uniquement s'il y a de l'overflow
+        if (layout && (layout.overflowX > 0 || layout.overflowY > 0)) {
+          d.isPan = true
+          setPan((p) => clampPan(p.x + dx, p.y + dy))
+        }
+      }
+    }
+  }
+
   const onPointerUp = (e) => {
-    const d = dragRef.current
-    dragRef.current = { origin: null, dragged: false }
-    if (d.dragged || !d.origin) return
-    const rect = stageRef.current.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    if (x < rect.width * 0.4) mangaMode ? nextPage() : prevPage()
-    else if (x > rect.width * 0.6) mangaMode ? prevPage() : nextPage()
+    pointersRef.current.delete(e.pointerId)
+
+    if (pointersRef.current.size < 2) {
+      pinchRef.current.active = false
+    }
+
+    // Si on vient de finir un geste complet (plus de doigts sur l'écran)
+    if (pointersRef.current.size === 0) {
+      const d = dragRef.current
+      dragRef.current = { origin: null, dragged: false }
+
+      // Si on a pinché pendant ce geste, on ignore le clic ou le swipe
+      if (pinchRef.current.didPinch) return
+      
+      if (!d.origin) return
+
+      const dx = e.clientX - d.startOrigin.x
+      const dy = e.clientY - d.startOrigin.y
+      const duration = Date.now() - d.startTime
+
+      // Détection de swipe horizontal
+      // (uniquement s'il n'y a pas de pan horizontal possible, ex: zoom=1)
+      const isSwipe = (!layout || layout.overflowX === 0) &&
+                      Math.abs(dx) > 50 &&
+                      Math.abs(dx) > Math.abs(dy) * 1.5 &&
+                      duration < 500
+
+      if (isSwipe) {
+        // "Slide de gauche a droite : page suivante" -> dx > 0
+        // "droite a gauche : page précédente" -> dx < 0
+        if (dx > 0) mangaMode ? nextPage() : prevPage()
+        else mangaMode ? prevPage() : nextPage()
+        return
+      }
+
+      if (d.dragged && d.isPan) return // C'était un vrai pan, on ignore le clic
+
+      // Si on a très peu bougé ou pas du tout, c'est un clic
+      if (!d.dragged || Math.abs(dx) + Math.abs(dy) <= 6) {
+        const rect = stageRef.current.getBoundingClientRect()
+        const x = e.clientX - rect.left
+        if (x < rect.width * 0.4) mangaMode ? nextPage() : prevPage()
+        else if (x > rect.width * 0.6) mangaMode ? prevPage() : nextPage()
+      }
+    }
+  }
+
+  const onPointerCancel = (e) => {
+    pointersRef.current.delete(e.pointerId)
+    if (pointersRef.current.size < 2) pinchRef.current.active = false
+    if (pointersRef.current.size === 0) {
+      dragRef.current = { origin: null, dragged: false }
+    }
   }
 
   // =================== ECRAN D'ACCUEIL ===================
@@ -476,6 +571,7 @@ export default function Reader({
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
         style={{ cursor: layout && (layout.overflowX || layout.overflowY) ? 'grab' : 'default' }}
       >
         {!displayReady && <div className="loading">Chargement...</div>}
