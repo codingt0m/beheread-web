@@ -260,7 +260,7 @@ export default function Reader({
     setZoom(1)
     setPan({ x: 0, y: 0 })
   }, [])
-  const setZoomClamped = useCallback((v) => setZoom(Math.max(0.2, Math.min(6, v))), [])
+  const setZoomClamped = useCallback((v) => setZoom(Math.max(1, Math.min(6, v))), [])
 
   const toggleFullscreen = useCallback(() => {
     if (fsElement()) fsExit()
@@ -304,6 +304,11 @@ export default function Reader({
   })
 
   const clampPan = useCallback((x, y) => computeClampPan(layout, x, y), [layout])
+
+  // Securiser le pan si le layout ou zoom change
+  useEffect(() => {
+    setPan(p => computeClampPan(layout, p.x, p.y))
+  }, [layout])
 
   // ---- Clavier (mappage identique au lecteur de bureau) ----
   useEffect(() => {
@@ -351,7 +356,23 @@ export default function Reader({
     const onWheel = (e) => {
       if (e.ctrlKey) {
         e.preventDefault()
-        setZoomClamped(zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1))
+        const targetZoom = zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1)
+        const newZoom = Math.max(1, Math.min(6, targetZoom))
+        if (newZoom === zoom) return
+
+        const S = newZoom / zoom
+        const rect = stageRef.current.getBoundingClientRect()
+        const stageCx = rect.width / 2
+        const stageCy = rect.height / 2
+
+        const vx = (e.clientX - rect.left) - (stageCx + pan.x)
+        const vy = (e.clientY - rect.top) - (stageCy + pan.y)
+
+        setZoom(newZoom)
+        setPan({
+          x: pan.x - vx * (S - 1),
+          y: pan.y - vy * (S - 1)
+        })
         return
       }
       if (e.deltaY > 0) nextPage()
@@ -367,8 +388,10 @@ export default function Reader({
     
     if (pointersRef.current.size === 2) {
       const pts = Array.from(pointersRef.current.values())
+      const cx = (pts[0].x + pts[1].x) / 2
+      const cy = (pts[0].y + pts[1].y) / 2
       const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
-      pinchRef.current = { active: true, initialDist: dist, initialZoom: zoom, didPinch: true }
+      pinchRef.current = { active: true, initialDist: dist, initialZoom: zoom, initialPan: pan, cx, cy, didPinch: true }
     } else if (pointersRef.current.size === 1) {
       pinchRef.current.didPinch = false // On commence un nouveau geste potentiel
       dragRef.current = { 
@@ -387,8 +410,28 @@ export default function Reader({
 
     if (pointersRef.current.size === 2 && pinchRef.current.active) {
       const pts = Array.from(pointersRef.current.values())
+      const currentCx = (pts[0].x + pts[1].x) / 2
+      const currentCy = (pts[0].y + pts[1].y) / 2
       const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
-      setZoomClamped(pinchRef.current.initialZoom * (dist / pinchRef.current.initialDist))
+
+      const pr = pinchRef.current
+      const targetZoom = pr.initialZoom * (dist / pr.initialDist)
+      const newZoom = Math.max(1, Math.min(6, targetZoom))
+
+      const S = newZoom / pr.initialZoom
+
+      const rect = stageRef.current.getBoundingClientRect()
+      const stageCx = rect.width / 2
+      const stageCy = rect.height / 2
+
+      const vx = (pr.cx - rect.left) - (stageCx + pr.initialPan.x)
+      const vy = (pr.cy - rect.top) - (stageCy + pr.initialPan.y)
+
+      setZoom(newZoom)
+      setPan({
+        x: (currentCx - rect.left) - stageCx - vx * S,
+        y: (currentCy - rect.top) - stageCy - vy * S
+      })
       return
     }
 
@@ -553,8 +596,10 @@ export default function Reader({
       </header>
 
       {/* En plein ecran les barres disparaissent : sur mobile (pas de touche
-          Echap) ce bouton flottant est le seul moyen de revenir en arriere. */}
-      {isFullscreen && (
+          Echap) ce bouton flottant est le seul moyen de revenir en arriere.
+          Sur iOS (iPad), le vrai fullscreen ajoute sa propre croix native inenlevable,
+          donc on evite d'afficher la notre en double. */}
+      {isFullscreen && !(nativeFs && isIOS()) && (
         <button
           className="fs-exit"
           onClick={toggleFullscreen}
