@@ -26,11 +26,7 @@ function isIOS() {
 // requestFullscreen ni webkitRequestFullscreen sur un element quelconque. On
 // bascule alors sur un plein ecran "CSS" (la liseuse couvre tout le viewport,
 // barres masquees) - voir `immersive` plus bas.
-// Sur iPad, le vrai Fullscreen affiche une croix native inenlevable, donc
-// on le desactive volontairement pour forcer le mode Immersive (CSS) et 
-// n'avoir que la croix de l'application.
 function fsSupported() {
-  if (isIOS()) return false
   const el = document.documentElement
   return !!(el.requestFullscreen || el.webkitRequestFullscreen)
 }
