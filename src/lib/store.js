@@ -141,6 +141,15 @@ export class Store {
     return this.progress[key]?.ts ?? 0
   }
 
+  clearProgress(key) {
+    if (this.progress[key] !== undefined) {
+      delete this.progress[key]
+      this._schedule('progress')
+      return this.flush()
+    }
+    return Promise.resolve()
+  }
+
   getReaderOffset(key) {
     return this.progress[key]?.offset ?? 0
   }

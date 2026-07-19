@@ -142,23 +142,23 @@ export default function Library({ store, token, onOpenEntry, onSignOut }) {
     let cancelled = false
     const seriesNames = [...new Map(entries.map((e) => [e.seriesKeyNorm, e.seriesName])).entries()]
 
-    ;(async () => {
-      for (const [key, name] of seriesNames) {
-        if (cancelled) return
-        const cached = store.seriesMeta(key)
-        if (cached && !isStaleNotFound(cached)) continue
-        try {
-          const [data] = await fetchSeries(name)
+      ; (async () => {
+        for (const [key, name] of seriesNames) {
           if (cancelled) return
-          if (data) {
-            store.setSeriesMeta(key, data)
-            setMetaTick((t) => t + 1)
+          const cached = store.seriesMeta(key)
+          if (cached && !isStaleNotFound(cached)) continue
+          try {
+            const [data] = await fetchSeries(name)
+            if (cancelled) return
+            if (data) {
+              store.setSeriesMeta(key, data)
+              setMetaTick((t) => t + 1)
+            }
+          } catch {
+            // best-effort only: a failed lookup just leaves the placeholder
           }
-        } catch {
-          // best-effort only: a failed lookup just leaves the placeholder
         }
-      }
-    })()
+      })()
 
     return () => { cancelled = true }
   }, [entries, store])

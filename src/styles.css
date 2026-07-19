@@ -1,22 +1,33 @@
 /* Palette reprise a l'identique du bureau (theme.py, mode sombre).
    Accent = rouge "Behelit" #c0392b, identique a l'app Windows. */
 :root {
-  --bg: #1b1e24;            /* window */
-  --panel: #14161b;         /* panel */
-  --header: #20242c;        /* header_bg : barres d'outils */
+  --bg: #1b1e24;
+  /* window */
+  --panel: #14161b;
+  /* panel */
+  --header: #20242c;
+  /* header_bg : barres d'outils */
   --text: #d7dbe2;
-  --muted: #8b93a1;         /* text_dim */
-  --accent: #c0392b;        /* ACCENT */
-  --accent-dim: rgba(192, 57, 43, 0.67);  /* ACCENT_DIM */
+  --muted: #8b93a1;
+  /* text_dim */
+  --accent: #c0392b;
+  /* ACCENT */
+  --accent-dim: rgba(192, 57, 43, 0.67);
+  /* ACCENT_DIM */
   --border: #2b2f36;
   --button: #262a32;
   --button-hover: #333844;
-  --reader-bg: #101216;     /* reader_bg */
+  --reader-bg: #101216;
+  /* reader_bg */
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
-html, body, #root {
+html,
+body,
+#root {
   margin: 0;
   height: 100%;
 }
@@ -55,7 +66,9 @@ body {
   letter-spacing: -0.02em;
 }
 
-.badge { color: var(--accent); }
+.badge {
+  color: var(--accent);
+}
 
 .subtitle {
   max-width: 480px;
@@ -77,7 +90,10 @@ code {
   border: 1px solid var(--border);
 }
 
-.error { color: #f28b82; font-weight: 600; }
+.error {
+  color: #f28b82;
+  font-weight: 600;
+}
 
 /* ---------------- Boutons ---------------- */
 button {
@@ -91,8 +107,16 @@ button {
   transition: background 0.15s ease, opacity 0.15s ease, border-color 0.15s ease;
   white-space: nowrap;
 }
-button:hover:not(:disabled) { background: var(--button-hover); border-color: var(--accent); }
-button:disabled { opacity: 0.5; cursor: default; }
+
+button:hover:not(:disabled) {
+  background: var(--button-hover);
+  border-color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 
 .primary {
   background: var(--accent);
@@ -102,7 +126,10 @@ button:disabled { opacity: 0.5; cursor: default; }
   padding: 12px 22px;
   font-size: 1.05rem;
 }
-.ghost { background: transparent; }
+
+.ghost {
+  background: transparent;
+}
 
 kbd {
   font: inherit;
@@ -155,7 +182,11 @@ kbd {
   color: var(--text);
   opacity: 0.5;
 }
-.fs-exit:hover:not(:disabled) { opacity: 1; background: rgba(20, 22, 27, 0.85); }
+
+.fs-exit:hover:not(:disabled) {
+  opacity: 1;
+  background: rgba(20, 22, 27, 0.85);
+}
 
 .toolbar {
   display: flex;
@@ -189,12 +220,16 @@ kbd {
   border-radius: 8px;
   overflow: hidden;
 }
+
 .zoom button {
   border: none;
   border-radius: 0;
   min-width: 40px;
 }
-.zoom button:not(:last-child) { border-right: 1px solid var(--border); }
+
+.zoom button:not(:last-child) {
+  border-right: 1px solid var(--border);
+}
 
 /* ---------------- Zone d'affichage ---------------- */
 .stage {
@@ -220,8 +255,13 @@ kbd {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 .page-img {
@@ -246,8 +286,15 @@ kbd {
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
-.hud .sep { margin: 0 8px; opacity: 0.4; }
-.hud strong { color: var(--accent); }
+
+.hud .sep {
+  margin: 0 8px;
+  opacity: 0.4;
+}
+
+.hud strong {
+  color: var(--accent);
+}
 
 .slider {
   -webkit-appearance: none;
@@ -258,11 +305,13 @@ kbd {
   background: var(--reader-bg);
   cursor: pointer;
 }
+
 .slider::-webkit-slider-runnable-track {
   height: 8px;
   border-radius: 4px;
   background: var(--reader-bg);
 }
+
 .slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
@@ -272,16 +321,19 @@ kbd {
   background: var(--accent);
   margin-top: -4px;
 }
+
 .slider::-moz-range-track {
   height: 8px;
   border-radius: 4px;
   background: var(--reader-bg);
 }
+
 .slider::-moz-range-progress {
   height: 8px;
   border-radius: 4px;
   background: var(--accent-dim);
 }
+
 .slider::-moz-range-thumb {
   width: 16px;
   height: 16px;
@@ -442,8 +494,13 @@ kbd {
 }
 
 @keyframes indeterminate {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(350%); }
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(350%);
+  }
 }
 
 .entry-name {
